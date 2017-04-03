@@ -1,0 +1,16 @@
+{
+  "name": "leaderboard-service",
+  "version": "0.0.1",
+  "description": "leaderboard service for red paper heart",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Eric Willenson",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.15.2",
+    "multer": "^1.3.0",
+    "mysql": "^2.13.0",
+  }
+}
