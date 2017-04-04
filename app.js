@@ -1,12 +1,16 @@
 'use strict';
 const express = require('express');
 const multer = require('multer');
-const { connection } = require('./connection.js');
+const mongo = require('mongodb').MongoClient;
+const ObjectId = require('mongodb').ObjectID;
 
 const app = express();
 app.listen( 4000, function() {
   console.log('started listening on 4000');
 });
+
+const connectionString = 'mongodb://localhost:27017/leaderboard';
+mongo.connect(connectionString, leaderboardService);
 
 const storage = multer.diskStorage({
   destination: function(req, file, cb) {
@@ -30,117 +34,133 @@ function generateNewRankings(players) {
     return uniqueScores.sort((a, b) => { return b - a});
 }
 
-function insertPlayer(player, imagePath, resolve, reject) {
+function insertPlayer(db, player, resolve, reject) {
     // assign new player a rank based on score
     // insert new player into database
     const addTime = new Date();
-    const cols = '(`leaderboard`,`name`,`score`,`image`,`rank`, `created_at`)';
-    const queryString = `INSERT INTO \`leaderboard\`.\`players\` ${cols}
-    VALUES('${player.leaderboard}',
-      '${player.name}',
-      ${player.score},
-      ${connection.escape(imagePath)},
-      ${player.rank},
-      '${addTime.toISOString().slice(0, 19).replace('T', ' ')}');
-    SELECT * FROM \`leaderboard\`.\`players\` WHERE \`id\`=LAST_INSERT_ID();
-    ` 
-    connection.query(queryString, (error, result, fields) => {
+    player.created_at = addTime.toISOString().slice(0, 19).replace('T', ' ');
+    db.collection('players').insertOne(player, (error, result) => {
       if (error) {
         console.log(error);
         reject(error);
         return;
       }
-      resolve(result[1]);
+      resolve(result)
     });
 }
 
-function updateRankings(playersToUpdate, scoreRankMap) {
+function updateRankings(db, playersToUpdate, scoreRankMap) {
   playersToUpdate.forEach((player, index, array) => {
     const addTime = new Date();
-    const queryString = `UPDATE \`players\`
-    SET \`rank\`=${scoreRankMap.indexOf(player.score)},
-        \`updated_at\`='${addTime.toISOString().slice(0, 19).replace('T', ' ')}'
-    WHERE \`id\`=${player.id}`;
-    connection.query(queryString, (error) => {
-      if (error) { console.log(error); }
-    });
+    db.collection('players')
+      .updateOne(
+        {_id: {$eq: ObjectId(player._id)}},
+        { 
+          $set: {
+            rank: scoreRankMap.indexOf(player.score),
+            updated_at: addTime.toISOString().slice(0, 19).replace('T', ' ')
+          }
+        },
+        (error, result) => {
+          if (error) {
+            console.log(error);
+          }
+        }
+      );
   });
 }
 
-// create routes
-router.post('/api/v1/lb', upload.single('image'), (req, res) => {
-  const { leaderboard, name, score } = req.body;
-  const imagePath = req.file ? req.file.path : 'public/default.jpg';
+function leaderboardService(err, db) {
 
-  const users = connection.query(`SELECT \`id\`,
-    \`score\`,
-    \`rank\`,
-    \`created_at\`
-    FROM \`leaderboard\`.\`players\`
-    WHERE \`leaderboard\`='${leaderboard}'
-    ORDER BY score DESC`,
-  (error, results, fields) => {
-    const nextLeaderboard = results;
-    nextLeaderboard.push({leaderboard, name, score: parseInt(score), imagePath});
-    const newPlayer = nextLeaderboard[nextLeaderboard.length - 1];
-    const scoreRankMap = generateNewRankings(nextLeaderboard);
-    newPlayer.rank = scoreRankMap.indexOf(newPlayer.score);
-    const insertedPlayer = new Promise((resolve, reject) => {
-      insertPlayer(newPlayer, imagePath, resolve, reject);
-    });
+  if (err) {
+    console.log(err);
+    return;
+  }
 
-    // sort the leaderboard with added player by score
-    // update the database with new rank for players with scores lower than
-    // the inserted player
-    nextLeaderboard.sort((a, b) => {
-      const ascore = a.score;
-      const bscore = b.score;
-      return bscore - ascore != 0 ? bscore - ascore : new Date(b.created_at) - new Date(a.created_at);
-    });
-    const playersToUpdate = nextLeaderboard.slice(nextLeaderboard.indexOf(newPlayer) + 1);
-    updateRankings(playersToUpdate, scoreRankMap);
+  // create routes
+  router.post('/api/v1/lb', upload.single('image'), (req, res) => {
+    const { leaderboard, name, score } = req.body;
+    const imagePath = req.file ? req.file.path : 'public/default.jpg';
 
-    insertedPlayer.then(player => {
-      res.status(200).json({
-        message: 'player successfully added',
-        newPlayer: player
+    const nextLeaderboard = db.collection('players').find({leaderboard: { $eq: leaderboard }}).sort({score: -1}).toArray((error, docs) => {
+      const nextLeaderboard = docs;
+      nextLeaderboard.push({leaderboard, name, score: parseInt(score), imagePath});
+      const newPlayer = nextLeaderboard[nextLeaderboard.length - 1];
+
+      const scoreRankMap = generateNewRankings(nextLeaderboard);
+      newPlayer.rank = scoreRankMap.indexOf(newPlayer.score);
+      const insertedPlayer = new Promise((resolve, reject) => {
+        insertPlayer(db, newPlayer, resolve, reject);
+      });
+
+      // sort the leaderboard with added player by score
+      // update the database with new rank for players with scores lower than
+      // the inserted player
+      nextLeaderboard.sort((a, b) => {
+        const ascore = a.score;
+        const bscore = b.score;
+        return bscore - ascore != 0 ? bscore - ascore : new Date(b.created_at) - new Date(a.created_at);
+      });
+      const playersToUpdate = nextLeaderboard.slice(nextLeaderboard.indexOf(newPlayer) + 1);
+      updateRankings(db, playersToUpdate, scoreRankMap);
+
+      insertedPlayer.then(player => {
+        if(player.result.ok === 1 && player.result.n === 1) {
+          res.status(200).json({
+            message: 'player successfully added',
+            newPlayer: player.ops[0]
+          });
+        }
       });
     });
   });
-});
 
-router.get('/api/v1/lb/:id/:count?', (req, res) => {
-  const limit = req.params.count ? `LIMIT ${req.params.count}` : '';
-  const users = connection.query(`SELECT * FROM \`leaderboard\`.\`players\`
-    WHERE \`leaderboard\`='${req.params.id}'
-    ORDER BY \`rank\` ASC, \`created_at\` DESC ${limit}`,
-  (error, results, fields) => {
-    res.status(200).send(results);
-    res.end();
+  router.get('/api/v1/lb/:id/:count?', (req, res) => {
+    const limit = parseInt(req.params.count) || 0;
+    db.collection('players')
+      .find({
+        leaderboard: {
+          $eq: req.params.id
+        }
+      })
+      .sort({
+        rank: 1,
+        created_at: -1
+      })
+      .limit(limit)
+      .toArray((error, result) => {
+        res.status(200).send(result);
+      })
   });
-});
 
-router.get('/api/v1/lb/:lbId/with/:pId/:count?', (req, res) => {
-  const limit = req.params.count ? `LIMIT ${req.params.count-1}` : '';
-  connection.query(`SELECT * FROM \`leaderboard\`.\`players\`
-    WHERE \`leaderboard\`='${req.params.lbId}'
-    ORDER BY \`rank\` ASC, \`created_at\` DESC ${limit}`,
-  (error, leaderResults, fields) => {
-    connection.query(`SELECT * FROM \`leaderboard\`.\`players\` WHERE \`id\`=${req.params.pId}`, (error, playerResult, fields) => {
-      
-      if (error) { console.log(error) }
+  router.get('/api/v1/lb/:lbId/with/:pId/:count?', (req, res) => {
+    const limit = parseInt(req.params.count)-1 || 0;
+    db.collection('players')
+      .find({leaderboard: {$eq: req.params.lbId}})
+      .sort({
+        rank: 1,
+        created_at: -1
+      })
+      .limit(limit)
+      .toArray((leaderError, leaderResults) => {
+        db.collection('players')
+          .findOne({_id: {$eq: ObjectId(req.params.pId)}}, (playerError, playerResult) => {
+          
+            const error = playerError || leaderError;
+            if (error) { console.log(error) }
 
-      if (leaderResults && playerResult.length === 1) {
-        leaderResults.push(playerResult[0]);
-        res.send(leaderResults);
-        res.end();
-      } else {
-        res.status(404).json({
-          error: "specified player not found"
-        });
-      }
-    })
+            if (leaderResults && playerResult) {
+              leaderResults.push(playerResult);
+              res.send(leaderResults);
+              res.end();
+            } else {
+              res.status(404).json({
+                error: "specified player not found"
+              });
+            }
+          })
+      });
   });
-});
 
-app.use('/', router);
+  app.use('/', router);
+}
