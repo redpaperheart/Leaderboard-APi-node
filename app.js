@@ -3,6 +3,7 @@ const express = require('express');
 const multer = require('multer');
 const mongo = require('mongodb').MongoClient;
 const ObjectId = require('mongodb').ObjectID;
+const autoIncrement = require('mongodb-autoincrement');
 
 const app = express();
 app.listen( 4000, function() {
@@ -39,13 +40,16 @@ function insertPlayer(db, player, resolve, reject) {
     // insert new player into database
     const addTime = new Date();
     player.created_at = addTime.toISOString().slice(0, 19).replace('T', ' ');
-    db.collection('players').insertOne(player, (error, result) => {
-      if (error) {
-        console.log(error);
-        reject(error);
-        return;
-      }
-      resolve(result)
+    autoIncrement.getNextSequence(db, 'players', (error, autoIndex) => {
+      player.id = autoIndex;
+      db.collection('players').insertOne(player, (error, result) => {
+        if (error) {
+          console.log(error);
+          reject(error);
+          return;
+        }
+        resolve(result)
+      });
     });
 }
 
@@ -146,7 +150,7 @@ function leaderboardService(err, db) {
       .limit(limit)
       .toArray((leaderError, leaderResults) => {
         db.collection('players')
-          .findOne({_id: {$eq: ObjectId(req.params.pId)}}, (playerError, playerResult) => {
+          .findOne({id: {$eq: req.params.pId}}, (playerError, playerResult) => {
           
             const error = playerError || leaderError;
             if (error) { console.log(error) }
