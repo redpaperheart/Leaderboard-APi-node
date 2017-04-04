@@ -3,6 +3,7 @@ const express = require('express');
 const multer = require('multer');
 const mongo = require('mongodb').MongoClient;
 const ObjectId = require('mongodb').ObjectID;
+const autoIncrement = require('mongodb-autoincrement');
 
 const app = express();
 app.listen( 4000, function() {
@@ -39,13 +40,16 @@ function insertPlayer(db, player, resolve, reject) {
     // insert new player into database
     const addTime = new Date();
     player.created_at = addTime.toISOString().slice(0, 19).replace('T', ' ');
-    db.collection('players').insertOne(player, (error, result) => {
-      if (error) {
-        console.log(error);
-        reject(error);
-        return;
-      }
-      resolve(result)
+    autoIncrement.getNextSequence(db, 'players', (error, autoIndex) => {
+      player.id = autoIndex;
+      db.collection('players').insertOne(player, (error, result) => {
+        if (error) {
+          console.log(error);
+          reject(error);
+          return;
+        }
+        resolve(result)
+      });
     });
 }
 
@@ -57,7 +61,7 @@ function updateRankings(db, playersToUpdate, scoreRankMap) {
         {_id: {$eq: ObjectId(player._id)}},
         { 
           $set: {
-            rank: scoreRankMap.indexOf(player.score),
+            rank: scoreRankMap.indexOf(player.score)+1,
             updated_at: addTime.toISOString().slice(0, 19).replace('T', ' ')
           }
         },
@@ -78,17 +82,22 @@ function leaderboardService(err, db) {
   }
 
   // create routes
+  
+  router.get('/api/v1', (req, res) => {
+    res.status(200).send('RPH-Leaderboard - node.js API - node / express 4');
+  });
+
   router.post('/api/v1/lb', upload.single('image'), (req, res) => {
     const { leaderboard, name, score } = req.body;
-    const imagePath = req.file ? req.file.path : 'public/default.jpg';
+    const image = req.file ? req.file.filename : '';
 
     const nextLeaderboard = db.collection('players').find({leaderboard: { $eq: leaderboard }}).sort({score: -1}).toArray((error, docs) => {
       const nextLeaderboard = docs;
-      nextLeaderboard.push({leaderboard, name, score: parseInt(score), imagePath});
+      nextLeaderboard.push({leaderboard, name, score: parseInt(score), image});
       const newPlayer = nextLeaderboard[nextLeaderboard.length - 1];
 
       const scoreRankMap = generateNewRankings(nextLeaderboard);
-      newPlayer.rank = scoreRankMap.indexOf(newPlayer.score);
+      newPlayer.rank = scoreRankMap.indexOf(newPlayer.score)+1;
       const insertedPlayer = new Promise((resolve, reject) => {
         insertPlayer(db, newPlayer, resolve, reject);
       });
@@ -106,10 +115,7 @@ function leaderboardService(err, db) {
 
       insertedPlayer.then(player => {
         if(player.result.ok === 1 && player.result.n === 1) {
-          res.status(200).json({
-            message: 'player successfully added',
-            newPlayer: player.ops[0]
-          });
+          res.status(200).json(player.ops[0]);
         }
       });
     });
@@ -144,7 +150,7 @@ function leaderboardService(err, db) {
       .limit(limit)
       .toArray((leaderError, leaderResults) => {
         db.collection('players')
-          .findOne({_id: {$eq: ObjectId(req.params.pId)}}, (playerError, playerResult) => {
+          .findOne({id: {$eq: req.params.pId}}, (playerError, playerResult) => {
           
             const error = playerError || leaderError;
             if (error) { console.log(error) }
@@ -163,4 +169,5 @@ function leaderboardService(err, db) {
   });
 
   app.use('/', router);
+  app.use('/storage/images/', express.static('public'));
 }
