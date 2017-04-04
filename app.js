@@ -89,7 +89,7 @@ function leaderboardService(err, db) {
 
   router.post('/api/v1/lb', upload.single('image'), (req, res) => {
     const { leaderboard, name, score } = req.body;
-    const image = req.file ? req.file.path : '';
+    const image = req.file ? req.file.filename : '';
 
     const nextLeaderboard = db.collection('players').find({leaderboard: { $eq: leaderboard }}).sort({score: -1}).toArray((error, docs) => {
       const nextLeaderboard = docs;
@@ -169,4 +169,5 @@ function leaderboardService(err, db) {
   });
 
   app.use('/', router);
+  app.use('/storage/', express.static('public'));
 }
