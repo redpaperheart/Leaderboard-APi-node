@@ -4,6 +4,7 @@ const multer = require('multer');
 const mongo = require('mongodb').MongoClient;
 const ObjectId = require('mongodb').ObjectID;
 const autoIncrement = require('mongodb-autoincrement');
+const base64Img = require('base64-img');
 
 const app = express();
 app.listen( 4000, function() {
@@ -18,7 +19,8 @@ const storage = multer.diskStorage({
                  cb(null, 'public/');
                },
   filename: function(req, file, cb) {
-              cb(null, Date.now() + '.jpg');
+              const filenameParts = file.originalname.split('.');
+              cb(null, `${Date.now()}.${filenameParts[filenameParts.length-1]}`);
             }
 });
 const upload = multer({ storage: storage });
@@ -88,12 +90,24 @@ function leaderboardService(err, db) {
   });
 
   router.post('/api/v1/lb', upload.single('image'), (req, res) => {
-    const { leaderboard, name, score } = req.body;
-    const image = req.file ? req.file.filename : '';
+    const { leaderboard, name, score, image } = req.body;
+    const imagePath = new Promise((resolve, reject) => {
+      if (req.file) {
+        resolve(req.file.filename);
+      } else if (image) {
+        base64Img.img(image, 'public', Date.now(), (err, filePath) => {
+          const pathParts = filePath.split('/');
+          resolve(pathParts[pathParts.length-1]);
+        });
+      } else {
+        resolve('');
+      }
+    });
 
     const nextLeaderboard = db.collection('players').find({leaderboard: { $eq: leaderboard }}).sort({score: -1}).toArray((error, docs) => {
+      imagePath.then((imagePath) => {
       const nextLeaderboard = docs;
-      nextLeaderboard.push({leaderboard, name, score: parseInt(score), image});
+      nextLeaderboard.push({leaderboard, name, score: parseInt(score), image: imagePath});
       const newPlayer = nextLeaderboard[nextLeaderboard.length - 1];
 
       const scoreRankMap = generateNewRankings(nextLeaderboard);
@@ -117,6 +131,8 @@ function leaderboardService(err, db) {
         if(player.result.ok === 1 && player.result.n === 1) {
           res.status(200).json(player.ops[0]);
         }
+      });
+      
       });
     });
   });
@@ -150,7 +166,7 @@ function leaderboardService(err, db) {
       .limit(limit)
       .toArray((leaderError, leaderResults) => {
         db.collection('players')
-          .findOne({id: {$eq: req.params.pId}}, (playerError, playerResult) => {
+          .findOne({id: {$eq: parseInt(req.params.pId)}}, (playerError, playerResult) => {
           
             const error = playerError || leaderError;
             if (error) { console.log(error) }
