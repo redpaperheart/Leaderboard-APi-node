@@ -169,5 +169,5 @@ function leaderboardService(err, db) {
   });
 
   app.use('/', router);
-  app.use('/storage/images/', express.static('public'));
+  app.use('/storage/', express.static('public'));
 }
