@@ -156,9 +156,10 @@ function leaderboardService(err, db) {
   });
 
   router.get('/api/v1/lb/:lbId/with/:pId/:count?', (req, res) => {
-    const limit = parseInt(req.params.count)-1 || 0;
+    const { lbId, count, pId } = req.params;
+    const limit = parseInt(count) || 0;
     db.collection('players')
-      .find({leaderboard: {$eq: req.params.lbId}})
+      .find({leaderboard: {$eq: lbId}})
       .sort({
         rank: 1,
         created_at: -1
@@ -166,13 +167,15 @@ function leaderboardService(err, db) {
       .limit(limit)
       .toArray((leaderError, leaderResults) => {
         db.collection('players')
-          .findOne({id: {$eq: parseInt(req.params.pId)}}, (playerError, playerResult) => {
+          .findOne({id: {$eq: parseInt(pId)}}, (playerError, playerResult) => {
           
             const error = playerError || leaderError;
             if (error) { console.log(error) }
 
             if (leaderResults && playerResult) {
-              leaderResults.push(playerResult);
+              if (!leaderResults.find((el) => el.id === parseInt(pId))) {
+                leaderResults.push(playerResult);
+              }
               res.send(leaderResults);
               res.end();
             } else {
