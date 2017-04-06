@@ -23,7 +23,7 @@ const storage = multer.diskStorage({
               cb(null, `${Date.now()}.${filenameParts[filenameParts.length-1]}`);
             }
 });
-const upload = multer({ storage: storage });
+  const upload = multer({ storage: storage });
 
 const router = express.Router();
 
@@ -90,6 +90,7 @@ function leaderboardService(err, db) {
   });
 
   router.post('/api/v1/lb', upload.single('image'), (req, res) => {
+    try {
     const { leaderboard, name, score, image } = req.body;
     const imagePath = new Promise((resolve, reject) => {
       if (req.file) {
@@ -135,6 +136,10 @@ function leaderboardService(err, db) {
       
       });
     });
+    }
+    catch (e) {
+      console.log('error: ',e);
+    }
   });
 
   router.get('/api/v1/lb/:id/:count?', (req, res) => {
