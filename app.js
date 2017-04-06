@@ -97,8 +97,13 @@ function leaderboardService(err, db) {
         resolve(req.file.filename);
       } else if (image) {
         base64Img.img(image, 'public', Date.now(), (err, filePath) => {
-          const pathParts = filePath.split('/');
-          resolve(pathParts[pathParts.length-1]);
+          var pathParts = filePath.split('/');
+          if(pathParts.length < 2){
+            pathParts = filePath.split('\\');
+          }
+          var p = pathParts[pathParts.length-1];
+          console.log("fix windows hack!", filePath, p);
+          resolve(p);
         });
       } else {
         resolve('');
