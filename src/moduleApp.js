@@ -100,9 +100,13 @@ function updateRankings(db, playersToUpdate, scoreRankMap) {
 
 function leaderboardService(app, router, db, upload) {
   // create routes
+  //
+  router.get('/', (req, res) => {
+    res.status(200).send('RPH-Leaderboard - node.js API - node / express 4 \\n leaderboard api v1 - mongo connected');
+  });
   
   router.get('/api/v1', (req, res) => {
-    res.status(200).send('RPH-Leaderboard - node.js API - node / express 4');
+    res.status(200).send('RPH-Leaderboard - node.js API - node / express 4 \\n leaderboard api v1 - mongo connected');
   });
 
   router.post('/api/v1/lb', upload.single('image'), (req, res) => {
