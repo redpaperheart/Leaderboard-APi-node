@@ -6,6 +6,8 @@ const ObjectId = require('mongodb').ObjectID;
 const autoIncrement = require('mongodb-autoincrement');
 const base64Img = require('base64-img');
 
+const connectionString = 'mongodb://localhost:27017/leaderboard';
+
 exports.Plugin = () => {};
 exports.Plugin.prototype.boot = () => {
   startLeaderboardService();
@@ -18,7 +20,6 @@ function startLeaderboardService() {
     console.log('started listening on 4000');
   });
 
-  const connectionString = 'mongodb://localhost:27017/leaderboard';
   const storage = multer.diskStorage({
     destination: function(req, file, cb) {
                    cb(null, 'public/');
@@ -30,7 +31,7 @@ function startLeaderboardService() {
   });
   const upload = multer({ storage: storage });
   const connectionInterval = setInterval(() => {
-    console.log('waiting for a database connection...')
+    console.log('waiting for a database connection...');
   }, 10000);
 
   mongo.connect(connectionString, leaderboardServiceConnectionProvider({app, router, upload, connectionInterval}));
@@ -41,11 +42,17 @@ function leaderboardServiceConnectionProvider({app, router, upload, connectionIn
   return (err, db) => {
     if (err) {
       console.log('database connection error: ', err);
+      const connectionInterval = setInterval(() => {
+        console.log('waiting for a database connection...');
+      }, 10000);
+      setTimeout(() => {
+        mongo.connect(connectionString, leaderboardServiceConnectionProvider({app, router, upload, connectionInterval}));
+      }, 10000);
       return;
     }
 
     console.log('database connection succeeded!');
-    leaderboardService(app, router, db, upload);
+    leaderboardService({app, router, db, upload});
   }
 }
 
@@ -98,9 +105,8 @@ function updateRankings(db, playersToUpdate, scoreRankMap) {
   });
 }
 
-function leaderboardService(app, router, db, upload) {
+function leaderboardService({app, router, db, upload}) {
   // create routes
-  //
   router.get('/', (req, res) => {
     res.status(200).send('RPH-Leaderboard - node.js API - node / express 4 \\n leaderboard api v1 - mongo connected');
   });
