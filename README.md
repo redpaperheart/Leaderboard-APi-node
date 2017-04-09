@@ -4,7 +4,16 @@
 1. Have node.js installed. This was built with 5.5.0 but any version after that should also work.
 2. Have NPM installed. This was built using NPM 3, but earlier versions should work.
 3. Run `npm install` in the root of the project.
-4. Run `node --harmony --harmony-destructuring app.js` in the root directory
+
+*If you're running a version of node.js that does _not_ support es6 features:*
+4. Run `npm run build` to transpile the service into es5 if you're running a version of node that
+doesn't support es6 features.
+4.5. Add a "plugin" prop to your `ampm.json` config object whose value is the path to `dist/moduleApp.js`.
+
+*If you're running a version of node.js that supports es6 features:*
+4. Add a "plugin" prop to your `ampm.json` config object whose value is the path to `src/moduleApp.js`.
+
+5. Run `ampm` from your app directory.
 
 The service should now be available on port 4000.
 

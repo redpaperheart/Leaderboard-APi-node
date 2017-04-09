@@ -1,0 +1,8 @@
+{
+  "default": {
+    "persistence": {
+      "launchCommand": "/Applications/Chromium.app/Contents/MacOS/Chromium --incognito --disable-pinch --overscroll-history-navigation=0 http://localhost:4000/api/v1"
+    },
+    "plugin": "dist/moduleApp.js"
+  }  
+}

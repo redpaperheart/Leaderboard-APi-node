@@ -6,26 +6,39 @@ const ObjectId = require('mongodb').ObjectID;
 const autoIncrement = require('mongodb-autoincrement');
 const base64Img = require('base64-img');
 
-const app = express();
-app.listen( 4000, function() {
-  console.log('started listening on 4000');
-});
+startLeaderboardService(); 
+function startLeaderboardService() {
+  const app = express(); 
+  app.listen( 4000, function() {
+    console.log('started listening on 4000');
+  });
 
-const connectionString = 'mongodb://localhost:27017/leaderboard';
-mongo.connect(connectionString, leaderboardService);
-
-const storage = multer.diskStorage({
-  destination: function(req, file, cb) {
-                 cb(null, 'public/');
-               },
-  filename: function(req, file, cb) {
-              const filenameParts = file.originalname.split('.');
-              cb(null, `${Date.now()}.${filenameParts[filenameParts.length-1]}`);
-            }
-});
+  const connectionString = 'mongodb://localhost:27017/leaderboard';
+  const storage = multer.diskStorage({
+    destination: function(req, file, cb) {
+                   cb(null, 'public/');
+                 },
+    filename: function(req, file, cb) {
+                const filenameParts = file.originalname.split('.');
+                cb(null, `${Date.now()}.${filenameParts[filenameParts.length-1]}`);
+              }
+  });
   const upload = multer({ storage: storage });
+  const router = express.Router();
 
-const router = express.Router();
+  mongo.connect(connectionString, leaderboardServiceConnectionProvider(router, upload, app));
+}
+
+function leaderboardServiceConnectionProvider(router, upload, app) {
+  return (err, db) => {
+    if (err) {
+      console.log(err);
+      return;
+    }
+
+    leaderboardService(db, router, upload, app);
+  }
+}
 
 function generateNewRankings(players) {
     // generate array with only unique scores
@@ -76,13 +89,7 @@ function updateRankings(db, playersToUpdate, scoreRankMap) {
   });
 }
 
-function leaderboardService(err, db) {
-
-  if (err) {
-    console.log(err);
-    return;
-  }
-
+function leaderboardService(db, router, upload, app) {
   // create routes
   
   router.get('/api/v1', (req, res) => {
