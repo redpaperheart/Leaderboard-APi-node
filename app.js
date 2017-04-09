@@ -6,26 +6,53 @@ const ObjectId = require('mongodb').ObjectID;
 const autoIncrement = require('mongodb-autoincrement');
 const base64Img = require('base64-img');
 
-const app = express();
-app.listen( 4000, function() {
-  console.log('started listening on 4000');
-});
-
 const connectionString = 'mongodb://localhost:27017/leaderboard';
-mongo.connect(connectionString, leaderboardService);
 
-const storage = multer.diskStorage({
-  destination: function(req, file, cb) {
-                 cb(null, 'public/');
-               },
-  filename: function(req, file, cb) {
-              const filenameParts = file.originalname.split('.');
-              cb(null, `${Date.now()}.${filenameParts[filenameParts.length-1]}`);
-            }
-});
+startLeaderboardService(); 
+
+function startLeaderboardService() {
+  const app = express(); 
+  const router = express.Router();
+  app.listen( 4000, function() {
+    console.log('started listening on 4000');
+  });
+
+  const connectionString = 'mongodb://localhost:27017/leaderboard';
+  const storage = multer.diskStorage({
+    destination: function(req, file, cb) {
+                   cb(null, 'public/');
+                 },
+    filename: function(req, file, cb) {
+                const filenameParts = file.originalname.split('.');
+                cb(null, `${Date.now()}.${filenameParts[filenameParts.length-1]}`);
+              }
+  });
   const upload = multer({ storage: storage });
+  const connectionInterval = setInterval(() => {
+    console.log('waiting for a database connection...')
+  }, 10000);
 
-const router = express.Router();
+  mongo.connect(connectionString, leaderboardServiceConnectionProvider({router, upload, app, connectionInterval}));
+}
+
+function leaderboardServiceConnectionProvider({router, upload, app, connectionInterval}) {
+  clearInterval(connectionInterval);
+  return (err, db) => {
+    if (err) {
+      console.log('database connection error: ', err);
+      const connectionInterval = setInterval(() => {
+        console.log('waiting for a database connection...');
+      }, 10000);
+      setTimeout(() => {
+        mongo.connect(connectionString, leaderboardServiceConnectionProvider({app, router, upload, connectionInterval}))
+      }, 10000);
+      return;
+    }
+
+    console.log('database connection succeeded!');
+    leaderboardService({db, router, upload, app});
+  }
+}
 
 function generateNewRankings(players) {
     // generate array with only unique scores
@@ -76,17 +103,14 @@ function updateRankings(db, playersToUpdate, scoreRankMap) {
   });
 }
 
-function leaderboardService(err, db) {
-
-  if (err) {
-    console.log(err);
-    return;
-  }
-
+function leaderboardService({db, router, upload, app}) {
   // create routes
+  router.get('/', (req, res) => {
+    res.status(200).send('RPH-Leaderboard - node.js API - node / express 4 \\n leaderboard api v1 - mongo connected');
+  });
   
   router.get('/api/v1', (req, res) => {
-    res.status(200).send('RPH-Leaderboard - node.js API - node / express 4');
+    res.status(200).send('RPH-Leaderboard - node.js API - node / express 4 \\n leaderboard api v1 - mongo connected');
   });
 
   router.post('/api/v1/lb', upload.single('image'), (req, res) => {
