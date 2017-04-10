@@ -17,7 +17,6 @@ function startLeaderboardService() {
     console.log('started listening on 4000');
   });
 
-  const connectionString = 'mongodb://localhost:27017/leaderboard';
   const storage = multer.diskStorage({
     destination: function(req, file, cb) {
                    cb(null, 'public/');
@@ -32,7 +31,12 @@ function startLeaderboardService() {
     console.log('waiting for a database connection...')
   }, 10000);
 
-  mongo.connect(connectionString, leaderboardServiceConnectionProvider({router, upload, app, connectionInterval}));
+  mongo.connect(connectionString, leaderboardServiceConnectionProvider({
+    router,
+    upload,
+    app,
+    connectionInterval
+  }));
 }
 
 function leaderboardServiceConnectionProvider({router, upload, app, connectionInterval}) {
@@ -49,8 +53,34 @@ function leaderboardServiceConnectionProvider({router, upload, app, connectionIn
       return;
     }
 
+    let connectionState = {connectionIsOpen: true};
+    const connectionCloseHandler = (event) => {
+      connectionState.connectionIsOpen = false;
+      console.log('database connection CLOSED with event:', event);
+
+      if(event) {
+        const reconnectTimer = setInterval(() => {
+          if (connectionState.connectionIsOpen === true) {
+            clearInterval(reconnectTimer);
+            return;
+          }
+          clearInterval(reconnectTimer);
+          db.close();
+          console.log('automatic reconnect failed, attempting to connect to database again...');
+          mongo.connect(connectionString, leaderboardServiceConnectionProvider({app, router, upload, connectionInterval}));
+        }, 40000)
+      }
+    }
+    const connectionReconnectHandler = (event) => {
+      connectionState.connectionIsOpen = true;
+      console.log('database connection REOPENED');
+    }
+
+    db.on('close', connectionCloseHandler);
+    db.on('reconnect', connectionReconnectHandler);
+
     console.log('database connection succeeded!');
-    leaderboardService({db, router, upload, app});
+    leaderboardService({db, router, upload, app}, connectionState);
   }
 }
 
@@ -103,7 +133,21 @@ function updateRankings(db, playersToUpdate, scoreRankMap) {
   });
 }
 
-function leaderboardService({db, router, upload, app}) {
+function isConnectionOpen(connectionState, res) {
+  const { connectionIsOpen } = connectionState;
+  return Promise.resolve(connectionIsOpen).then((connectionIsOpen => {
+    return new Promise((resolve, reject) => {
+      if (connectionIsOpen) {
+        resolve();
+      } else {
+        res.status(500).json([]);
+        reject();
+      }
+    });
+  }));
+}
+
+function leaderboardService({db, router, upload, app}, connectionState) {
   // create routes
   router.get('/', (req, res) => {
     res.status(200).send('RPH-Leaderboard - node.js API - node / express 4 \\n leaderboard api v1 - mongo connected');
@@ -134,35 +178,36 @@ function leaderboardService({db, router, upload, app}) {
       }
     });
 
-    const nextLeaderboard = db.collection('players').find({leaderboard: { $eq: leaderboard }}).sort({score: -1}).toArray((error, docs) => {
-      imagePath.then((imagePath) => {
-      const nextLeaderboard = docs;
-      nextLeaderboard.push({leaderboard, name, score: parseInt(score), image: imagePath});
-      const newPlayer = nextLeaderboard[nextLeaderboard.length - 1];
+    isConnectionOpen(connectionState, res).then(() => {
+      const nextLeaderboard = db.collection('players').find({leaderboard: { $eq: leaderboard }}).sort({score: -1}).toArray((error, docs) => {
+        imagePath.then((imagePath) => {
+          const nextLeaderboard = docs;
+          nextLeaderboard.push({leaderboard, name, score: parseInt(score), image: imagePath});
+          const newPlayer = nextLeaderboard[nextLeaderboard.length - 1];
 
-      const scoreRankMap = generateNewRankings(nextLeaderboard);
-      newPlayer.rank = scoreRankMap.indexOf(newPlayer.score)+1;
-      const insertedPlayer = new Promise((resolve, reject) => {
-        insertPlayer(db, newPlayer, resolve, reject);
-      });
+          const scoreRankMap = generateNewRankings(nextLeaderboard);
+          newPlayer.rank = scoreRankMap.indexOf(newPlayer.score)+1;
+          const insertedPlayer = new Promise((resolve, reject) => {
+            insertPlayer(db, newPlayer, resolve, reject);
+          });
 
-      // sort the leaderboard with added player by score
-      // update the database with new rank for players with scores lower than
-      // the inserted player
-      nextLeaderboard.sort((a, b) => {
-        const ascore = a.score;
-        const bscore = b.score;
-        return bscore - ascore != 0 ? bscore - ascore : new Date(b.created_at) - new Date(a.created_at);
-      });
-      const playersToUpdate = nextLeaderboard.slice(nextLeaderboard.indexOf(newPlayer) + 1);
-      updateRankings(db, playersToUpdate, scoreRankMap);
+          // sort the leaderboard with added player by score
+          // update the database with new rank for players with scores lower than
+          // the inserted player
+          nextLeaderboard.sort((a, b) => {
+            const ascore = a.score;
+            const bscore = b.score;
+            return bscore - ascore != 0 ? bscore - ascore : new Date(b.created_at) - new Date(a.created_at);
+          });
+          const playersToUpdate = nextLeaderboard.slice(nextLeaderboard.indexOf(newPlayer) + 1);
+          updateRankings(db, playersToUpdate, scoreRankMap);
 
-      insertedPlayer.then(player => {
-        if(player.result.ok === 1 && player.result.n === 1) {
-          res.status(200).json(player.ops[0]);
-        }
-      });
-      
+          insertedPlayer.then(player => {
+            if(player.result.ok === 1 && player.result.n === 1) {
+              res.status(200).json(player.ops[0]);
+            }
+          });
+        });
       });
     });
     }
@@ -173,25 +218,28 @@ function leaderboardService({db, router, upload, app}) {
 
   router.get('/api/v1/lb/:id/:count?', (req, res) => {
     const limit = parseInt(req.params.count) || 0;
-    db.collection('players')
-      .find({
-        leaderboard: {
-          $eq: req.params.id
-        }
-      })
-      .sort({
-        rank: 1,
-        created_at: -1
-      })
-      .limit(limit)
-      .toArray((error, result) => {
-        res.status(200).send(result);
-      })
+    isConnectionOpen(connectionState, res).then(() => {
+      db.collection('players')
+        .find({
+          leaderboard: {
+            $eq: req.params.id
+          }
+        })
+        .sort({
+          rank: 1,
+          created_at: -1
+        })
+        .limit(limit)
+        .toArray((error, result) => {
+          res.status(200).send(result);
+        })
+    });
   });
 
   router.get('/api/v1/lb/:lbId/with/:pId/:count?', (req, res) => {
     const { lbId, count, pId } = req.params;
     const limit = parseInt(count) || 0;
+    isConnectionOpen(connectionState, res).then(() => {
     db.collection('players')
       .find({leaderboard: {$eq: lbId}})
       .sort({
@@ -219,6 +267,7 @@ function leaderboardService({db, router, upload, app}) {
             }
           })
       });
+    })
   });
 
   app.use('/', router);
